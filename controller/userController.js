@@ -3,6 +3,9 @@ const bcrypt = require('bcrypt');
 const axios = require('axios').default;
 const { promisify } = require('util');
 
+const catchAsync = require('./../utils/catchAsync');
+const AppError = require('../utils/appError');
+
 const paswordCompare = promisify(bcrypt.compare);
 
 const signToken = email => {
@@ -30,93 +33,76 @@ const createSendToken = (email, statusCode, res) => {
   });
 };
 
-exports.register = async (req, res, next) => {
-  try {
-    const check = await axios({
-      method: 'get',
-      url: `http://${process.env.DB_MYSQL}/user`,
-      data: {
-        email: req.body.email
-      }
-    }).then(axios => {
-      return axios.data.results;
+exports.register = catchAsync(async (req, res, next) => {
+  const check = await axios({
+    method: 'get',
+    url: `http://${process.env.DB_MYSQL}/user`,
+    data: {
+      email: req.body.email
+    }
+  }).then(response => {
+    return response.data.results;
+  });
+
+  // this looks if there was a user already
+  if (check.length > 0) {
+    res.status(500).json({
+      status: 'user already exists'
+    });
+  } else {
+    const hashedPassword = await bcrypt
+      .hash(req.body.password, 0)
+      .then(hash => {
+        return hash;
+      });
+
+    req.body.password = hashedPassword;
+
+    const result = await axios({
+      method: 'post',
+      url: `http://${process.env.DB_MYSQL}/createUser`,
+      data: req.body
+    }).then(response => {
+      return response.data;
     });
 
-    // this looks if there was a user already
-    if (check.length > 0) {
-      res.status(500).json({
-        status: 'user already exists'
+    if (result.status === 'success') {
+      res.status(200).json({
+        status: 'success',
+        results: 'user created '
       });
     } else {
-      let hashedPassword = await bcrypt
-        .hash(req.body.password, 0)
-        .then(hash => {
-          return hash;
-        });
-
-      req.body.password = hashedPassword;
-
-      const result = await axios({
-        method: 'post',
-        url: `http://${process.env.DB_MYSQL}/createUser`,
-        data: req.body
-      }).then(axios => {
-        return axios.data;
-      });
-
-      if (result.status === 'success') {
-        res.status(200).json({
-          status: 'success',
-          results: 'user created '
-        });
-      } else {
-        throw err;
-      }
+      next(new AppError('there was an error creating your user', 404));
     }
-  } catch (err) {
-    res.status(500).json({
-      status: 'there was an error in the server',
-      results: err
-    });
   }
-};
+});
 
-exports.login = async (req, res, next) => {
-  try {
-    const axiosReponse = await axios({
-      method: 'get',
-      url: `http://${process.env.DB_MYSQL}/user`,
-      data: {
-        email: req.body.email
-      }
-    }).then(resAx => {
-      return resAx.data.results;
-    });
-
-    // check if there is a user or more than one
-    if (axiosReponse.length > 1 || axiosReponse.length === 0) {
-      res.status(500).json({
-        status: 'there was an error getting your credential'
-      });
+exports.login = catchAsync(async (req, res, next) => {
+  const axiosReponse = await axios({
+    method: 'get',
+    url: `http://${process.env.DB_MYSQL}/user`,
+    data: {
+      email: req.body.email
     }
-    const user = axiosReponse[0];
-    const hashCompare = await paswordCompare(req.body.password, user.password).then(prom => {
-      return prom;
-    });
+  }).then(resAx => {
+    return resAx.data.results;
+  });
 
-    if (!hashCompare) {
-      next(  res.status(500).json({
-        result: "Fail",
-        message: "incorrect password"
-      }) );
-    } else {
-      createSendToken(user.email, 200, res);
-    }
-   
-  } catch (err) {
-    res.status(500).json({
-      status: 'there was an error in the server',
-      results: err
-    });
+  // check if there is a user or more than one
+  if (axiosReponse.length > 1 || axiosReponse.length === 0) {
+    next(new AppError('there was an error getting your credentials', 403));
   }
-};
+  const user = axiosReponse[0];
+  const hashCompare = await paswordCompare(
+    req.body.password,
+    user.password
+  ).then(prom => {
+    return prom;
+  });
+
+  if (!hashCompare) {
+    next(new AppError('wrong password', 403));
+  } else {
+    createSendToken(user.email, 200, res);
+  }
+});
