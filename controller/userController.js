@@ -46,9 +46,7 @@ exports.register = catchAsync(async (req, res, next) => {
 
   // this looks if there was a user already
   if (check.length > 0) {
-    res.status(500).json({
-      status: 'user already exists'
-    });
+    next(new AppError('user already exists ', 403));
   } else {
     const hashedPassword = await bcrypt
       .hash(req.body.password, 0)

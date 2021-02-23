@@ -6,6 +6,9 @@ const handleJWTError = () =>
 const handleJWTExpiredError = () =>
   new AppError('Your token has expired! Please log in again.', 401);
 
+const handleAxiosError = () =>
+  new AppError('there was an error requesting to the DB', 401);
+
 const sendErrorDev = (err, req, res) => {
   return res.status(err.statusCode).json({
     status: err.status,
@@ -17,23 +20,22 @@ const sendErrorDev = (err, req, res) => {
 
 const sendErrorProd = (err, req, res) => {
   // A) API
-  if (req.originalUrl.startsWith('/api')) {
-    // A) Operational, trusted error: send message to client
-    if (err.isOperational) {
-      return res.status(err.statusCode).json({
-        status: err.status,
-        message: err.message
-      });
-    }
-    // B) Programming or other unknown error: don't leak error details
-    // 1) Log error
-    console.error('ERROR ', err);
-    // 2) Send generic message
-    return res.status(500).json({
-      status: 'error',
-      message: 'Something went very wrong!'
+
+  // A) Operational, trusted error: send message to client
+  if (err.isOperational) {
+    return res.status(err.statusCode).json({
+      status: err.status,
+      message: err.message
     });
   }
+  // B) Programming or other unknown error: don't leak error details
+  // 1) Log error
+  console.error('ERROR ', err);
+  // 2) Send generic message
+  return res.status(500).json({
+    status: 'error',
+    message: 'Something went very wrong!'
+  });
 };
 
 module.exports = (err, req, res, next) => {
@@ -48,7 +50,7 @@ module.exports = (err, req, res, next) => {
 
     if (error.name === 'JsonWebTokenError') error = handleJWTError();
     if (error.name === 'TokenExpiredError') error = handleJWTExpiredError();
-
+    if (error.isAxiosError) error = handleAxiosError();
     sendErrorProd(error, req, res);
   }
 };
